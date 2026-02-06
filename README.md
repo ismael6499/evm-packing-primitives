@@ -1,59 +1,72 @@
-# 🧶 EVM Serialization Primitives: ABI Encoding Patterns
+# 📦 EVM Serialization Primitives: Deterministic State Encoding
 
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.24-363636?style=flat-square&logo=solidity)
-![EVM](https://img.shields.io/badge/Topic-Low_Level_Bytes-red?style=flat-square)
-![Gas](https://img.shields.io/badge/Gas-Packed_vs_Standard-green?style=flat-square)
+![Gas Optimization](https://img.shields.io/badge/Gas_Optimization-High-green?style=flat-square)
+![Testing](https://img.shields.io/badge/Testing-Foundry-bf4904?style=flat-square)
 
-A technical reference implementation exploring the nuances of data serialization on the Ethereum Virtual Machine.
+A set of architectural primitives for **Deterministic Unique Identifier (UID) Generation** and optimized data packing on the EVM. This repository implements the canonical sorting and hashing patterns used by protocols like Uniswap V3 to enable stateless architecture.
 
-This project isolates the mechanisms of **ABI Encoding** (`abi.encode`) versus **Packed Encoding** (`abi.encodePacked`), providing a benchmark for developers to understand the trade-offs between cryptographic integrity (collision resistance) and gas efficiency when preparing data for hashing (`keccak256`) or external calls.
+## ⚡ Technical Context
 
-## 🏗 Architecture & Design Decisions
+In high-performance DeFi protocols, relying on storage (`SSTORE`/`SLOAD`) to maintain registries of asset pairs or order IDs is prohibitively expensive and creates state bloat.
 
-### 1. Serialization Strategy (Standard vs. Packed)
-- **Standard Encoding (`abi.encode`):**
-  - Utilized for inter-contract calls to strictly adhere to the ABI specification, ensuring 32-byte padding for static types.
-  - **Use Case:** Validated its necessity for preventing **Hash Collisions** when dealing with dynamic types (e.g., `(string, string)`), where packed encoding fails to distinguish boundaries.
-- **Packed Encoding (`abi.encodePacked`):**
-  - Implemented for specific gas-optimization scenarios where data layout compactness outweighs ABI compliance.
-  - **Optimization:** Demonstrates significant gas reduction by removing padding zeroes, critical for generating cheap commitments or signatures within the contract logic.
+The industry standard solution is **Deterministic Computation**: deriving identifiers mathematically from the immutable properties of the assets themselves. This approach allows contracts to verify the existence and validity of a resource (like a Liquidity Pool) purely through hashing, achieving **O(1)** complexity without storage lookups.
 
-### 2. Cryptographic Integrity
-- **Collision Analysis:**
-  - The repository includes test cases specifically designed to demonstrate how `abi.encodePacked("a", "bc")` produces the exact same hash as `abi.encodePacked("ab", "c")`.
-  - **Security Pattern:** This serves as a negative test case to justify the architectural decision of using `abi.encode` for hashing distinct dynamic parameters, a common vulnerability in signature verification schemas.
+This repository benchmarks and implements these serialization patterns, focusing on the trade-offs between `abi.encode` (standard padding) and `abi.encodePacked` (compressed serialization).
 
-### 3. String & Bytes Manipulation
-- **Type Casting:**
-  - Demonstrates the low-level conversion of `string` to `bytes` for raw manipulation. This is foundational for understanding how high-level Solidity types translate to EVM memory allocation.
+## 🏗 Architecture & Design Patterns
 
-## 🧪 Testing Strategy (Foundry)
+### 1. Canonical Sorting (Invariant Ordering)
+* **The Problem:** `Pool(TokenA, TokenB)` and `Pool(TokenB, TokenA)` are logically identical but would generate different hashes if naively encoded.
+* **The Solution:** Implemented a lightweight sorting algorithm (`token0 < token1`) before serialization.
+* **Outcome:** Ensures collision-resistant, order-independent IDs. This is critical for **CREATE2** address prediction and off-chain indexing.
 
-The test suite validates the binary output of the encoding functions:
+### 2. Tight Variable Packing (Gas Optimization)
+* **Mechanism:** Utilizes `abi.encodePacked` to strip 32-byte padding from data structures.
+* **Use Case:** Optimized for generating payloads for **EIP-712** signatures or creating compact keys for nested mappings.
+* **Benchmark:** Demonstrates significant calldata reduction compared to standard ABI encoding, essential for L2 rollups where calldata cost is the bottleneck.
 
-- **Byte-Level Assertions:**
-  - Unlike standard logic tests, this suite asserts the exact hexadecimal output of the encoding functions to verify padding behavior.
-- **Collision Fuzzing:**
-  - Validates that `encodePacked` produces identical byte streams for ambiguous inputs, reinforcing the security warnings documented in the codebase.
+### 3. Collision Resistance
+* **Security:** Structured the data inputs to prevent "Hash Collision" attacks common in dynamic type packing. By enforcing strict type lengths (address, uint24) within the packed stream, the protocol mitigates ambiguity attacks.
 
 ## 🛠 Tech Stack
 
-* **Core:** Solidity `^0.8.24`
-* **Focus:** `abi.encode`, `abi.encodePacked`, `keccak256`
-* **Tooling:** Foundry (Cast/Forge)
+* **Language:** Solidity `0.8.24`
+* **Framework:** Foundry (Forge) for fuzzing and differential testing.
+* **Primitives:** `keccak256`, `abi.encodePacked`, Assembly (Low-level optimization).
 
-## 📝 Serialization Interface
+## 📝 Usage Interface
 
-The contract exposes primitives to inspect EVM memory layout:
+The library exposes primitives for deterministic generation:
 
 ```solidity
-// Returns 32-byte padded data (Safe for hashing dynamic types)
-function encodeStandard(uint256 number, address addr) external pure returns (bytes memory) {
-    return abi.encode(number, addr);
-}
+/**
+ * @notice Generates a deterministic Pool ID using Canonical Sorting.
+ * @dev Replicates the computing logic of Uniswap V3 Factory.
+ */
+function createPoolIdentifier(
+    address tokenA, 
+    address tokenB, 
+    uint24 fee
+) external returns (bytes32 poolId);
 
-// Returns minimal byte stream (Gas efficient, collision prone)
-function encodePacked(uint256 number, address addr) external pure returns (bytes memory) {
-    return abi.encodePacked(number, addr);
-}
+/**
+ * @notice Creates a compact byte-stream for off-chain signing or trailing stops.
+ */
+function encodeTrailingStopOrder(
+    address user,
+    address token,
+    uint256 amount,
+    uint256 trailingPercent,
+    uint256 activationPrice
+) external returns (bytes memory packedData);
 ```
+
+## 🧪 Testing Strategy
+
+* **Invariant Testing:** Fuzz tests ensure that `createPoolIdentifier(A, B)` always equals `createPoolIdentifier(B, A)` for random address permutations.
+* **Differential Testing:** Compares packed output against standard encoding to verify byte-alignment.
+
+---
+
+*This codebase is maintained for research into EVM low-level serialization techniques.*
