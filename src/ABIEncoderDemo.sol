@@ -232,13 +232,15 @@ contract ABIEncoderDemo {
     * @param rewardRate Rate of rewards
     * @param lockPeriod Period of lock in seconds
     * @param maxStakers Maximum number of stakers
+    * @param deadline Deadline for the pool
     * @return poolConfig Encoded pool configuration data
     */
     function encodeStakingPoolConfig(
         address token, 
         uint256 rewardRate, 
         uint256 lockPeriod, 
-        uint256 maxStakers
+        uint256 maxStakers,
+        uint256 deadline
     ) external returns(bytes memory poolConfig){
 
         //Encode the pool config data
@@ -247,7 +249,7 @@ contract ABIEncoderDemo {
             rewardRate, 
             lockPeriod, 
             maxStakers, 
-            block.timestamp
+            deadline
         );
 
         emit EncodedData(keccak256(poolConfig), poolConfig);
